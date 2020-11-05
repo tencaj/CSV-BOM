@@ -29,6 +29,7 @@ class BOMCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
 		product = app.activeProduct
 		design = adsk.fusion.Design.cast(product)
 		lastPrefs = design.attributes.itemByName(cmdId, "lastUsedOptions")
+		_includeMcMasterLinks = True
 		_onlySelectedComps = False
 		_includeBoundingboxDims = True
 		_splitDims = True
@@ -49,6 +50,7 @@ class BOMCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
 		if lastPrefs:
 			try:
 				lastPrefs = json.loads(lastPrefs.value)
+				_includeMcMasterLinks = lastPrefs.get("includeMcMasterLinks", True)
 				_onlySelectedComps = lastPrefs.get("onlySelComp", False)
 				_includeBoundingboxDims = lastPrefs.get("incBoundDims", True)
 				_splitDims = lastPrefs.get("splitDims", True)
@@ -73,6 +75,10 @@ class BOMCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
 		eventArgs = adsk.core.CommandCreatedEventArgs.cast(args)
 		cmd = eventArgs.command
 		inputs = cmd.commandInputs
+
+		ipMcMasterLinks = inputs.addBoolValueInput(cmdId + "_includeMcMasterLinks", "Include McMaster Links", True, "", _includeMcMasterLinks)
+		ipMcMasterLinks.tooltip = "Include McMaster links in CSV output"
+
 		ipSelectComps = inputs.addBoolValueInput(cmdId + "_onlySelectedComps", "Selected only", True, "", _onlySelectedComps)
 		ipSelectComps.tooltip = "Only selected components will be used"
 
@@ -192,6 +198,8 @@ class BOMCommandExecuteHandler(adsk.core.CommandEventHandler):
 			csvHeader.append("Material")
 		if prefs["incDesc"]:
 			csvHeader.append("Description")
+		if prefs["incMcMasterLinks"]:
+			csvHeader.append("McMaster link")
 		for k in csvHeader:
 			csvStr += '"' + k + '",'
 		csvStr += '\n'
@@ -247,6 +255,8 @@ class BOMCommandExecuteHandler(adsk.core.CommandEventHandler):
 				csvStr += '"' + item["material"] + '",'
 			if prefs["incDesc"]:
 				csvStr += '"' + item["desc"] + '",'
+			if prefs["incMcMasterLinks"]:
+				csvStr += '"' + item["mcMasterLink"] + '",'
 			csvStr += '\n'
 		return csvStr
 
@@ -304,6 +314,7 @@ class BOMCommandExecuteHandler(adsk.core.CommandEventHandler):
 
 	def getPrefsObject(self, inputs):
 		obj = {
+			"incMcMasterLinks": inputs.itemById(cmdId + "_includeMcMasterLinks").value,
 			"onlySelComp": inputs.itemById(cmdId + "_onlySelectedComps").value,
 			"incBoundDims": inputs.itemById(cmdId + "_includeBoundingboxDims").value,
 			"splitDims": inputs.itemById(cmdId + "_splitDims").value,
@@ -436,6 +447,19 @@ class BOMCommandExecuteHandler(adsk.core.CommandEventHandler):
 					matList.append(mat)
 		return ', '.join(matList)
 
+	def getMcMasterLink(self, name):
+	# Create McMaster link with comp name
+		try:
+			nameLen = len(name)
+			# Attempt to match common syntax like 97447A010
+			if str.isalpha(name[nameLen-4]) and str.isnumeric(name[nameLen-3:nameLen]):
+				mcMasterLink = "https://www.mcmaster.com/%s/" % (name)
+			else:
+				mcMasterLink = ""
+		except:
+			mcMasterLink = ""
+		return mcMasterLink
+
 	def filterFusionCompNameInserts(self, name):
 		name = re.sub("\([0-9]+\)$", '', name)
 		name = name.strip()
@@ -535,7 +559,8 @@ class BOMCommandExecuteHandler(adsk.core.CommandEventHandler):
 							"mass": self.getPhysicalMass(comp.bRepBodies),
 							"density": self.getPhysicalDensity(comp.bRepBodies),
 							"material": self.getPhysicalMaterial(comp.bRepBodies),
-							"desc": comp.description
+							"desc": comp.description,
+							"mcMasterLink": self.getMcMasterLink(comp.name)
 						})
 			csvStr = self.collectData(design, bom, prefs)
 			output = open(filename, 'w')
